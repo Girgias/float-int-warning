@@ -4,24 +4,46 @@
   * Author: George Peter Banyard, <girgias@php.net>
   * Status: Draft
   * First Published at: http://wiki.php.net/rfc/float-int-warning
+  * GitHub mirror: https://github.com/Girgias/float-int-warning
 
 ## Introduction 
 
-PHP is a dynamically typed language and as such implicit type coercion naturally arises, most of these are harmless and rather convenient.
+PHP is a dynamically typed language and as such implicit type coercion naturally arises,
+most of these are harmless and rather convenient.
 However, `float` to `int` conversion can lead to data loss if the fractional part is non zero.
 This extends to the conversion of float strings when converted to `int`.
 
 ## Proposal
-Emit an `E_WARNING` level diagnostic error for implicit conversion from `float` and float strings to `int` if the fractionnal part is non-zero.
-And raise this warning to a `TypeError` in the next major version (PHP 9.0).
+Emit an `E_WARNING` level diagnostic error for implicit conversion from `float` and float strings
+to `int` if the fractionnal part is non-zero.
 
-## Rationale [W.I.P.]
+The warning is dependent on the origin type which leads the conversion, i.e. separate warnings for
+`float` to `int` and float string to `int`.
 
-Cannot safely use PHP's type juggling for string to int, as it will convert an invalid float string, something usefull as everything is a string in HTTP
+And raise these warnings to `TypeError` in the next major version (PHP 9.0).
 
-No way of knowing data loss
+## Rationale
 
-String offsets already emit warnigns
+Following the changes in behaviour and definition of numeric strings in PHP 8 [1][2] it should be a
+reasonable expectation to safely be able to use PHP's type juggling from string to int as such data
+can come from a variety from places (HTTP request, database query, text file, etc.).
+However, because `float`s, and by extension float strings, get silently converted to `int` there is
+no way to know if the data provided is erroneous and/or provokes data loss.
+
+The lack of possibility of knowing if data loss arised necessitates the use of the `strict_type` mode,
+which is an issue in itself when using a function which returns a `float` but given the input arguments
+an `int` compatible return is to be expected, this mostly affects mathematical functions, the most notable
+example being the ``round()`` function when passing a non-positive precision
+
+Finally, the use of a `float` or float string as a string offset already emits a warning as it needs
+to perform a conversion, this proposal would generalize this aspect to other areas of PHP.
+
+## Implementation notes
+
+A new `zend_dval_to_lval_safe()` C function is introduced which performs an additional `modf()` check against 0.
+
+The C function `zend_dval_to_lval_cap()` is modified and has this additional `modf()` check introduced as it is only
+used twice, and both times for converting float strings to int.
 
 ## Backward Incompatible Changes
 The following operations will now emit an `E_WARNING` if a `float`s or float string with non-zero fractional part is used:
@@ -29,10 +51,10 @@ The following operations will now emit an `E_WARNING` if a `float`s or float str
  - Bitwise OR operator `|`
  - Bitwise AND operator `&`
  - Bitwise XOR operator `^`
- - Shift right and left operator
+ - Shift right and left operators
  - Modulo operator
  - The combined assignment operators of the above operators
- - Assignement to a typed property of type `int`
+ - Assignement to a typed property of type `int` in coercive typing mode
  - Argument for a parameter of type `int` for both internal and userland functions in coercive typing mode
  - Returning such a value for userland functions declared with a return type of ``int`` in coercive typing mode
 
@@ -48,8 +70,8 @@ Next minor version: PHP 8.1.
 ### To Existing Extensions 
 None
 
-### To Opcache 
-Rules about accepting floats instead of int would need to be reviewed as emitting diagnostics pose an issue from my udnerstanding
+### To OPcache 
+Rules about accepting floats instead of int would need to be reviewed as emitting diagnostics pose an issue from my understanding
 
 ## Open Issues 
 Make sure there are no open issues when the vote starts!
@@ -60,16 +82,18 @@ Make sure there are no open issues when the vote starts!
  - Integer to float implicit conversions are not affected.
  - Strict Type behaviour is unaffected.
  - The behaviour of passing float strings as an array key.
+ - The behaviour of passing a `float` or float string as a string offset.
  - A bitwise NOT `~` operation on a float string is still performed with string semantics.
 
 ## Future Scope
  - Possibility to normalize float strings for array keys.
+ - Possibility to allow compatible float and float strings for string offsets.
 
 ## Proposed Voting Choices
 As per the voting RFC a yes/no vote with a 2/3 majority is needed for this proposal to be accepted.
 
 ## Patches and Tests 
-W.I.P. patch: https://github.com/php/php-src/pull/6661
+Patch: https://github.com/php/php-src/pull/6661
 
 ## Implementation 
 After the project is implemented, this section should contain
@@ -79,7 +103,8 @@ After the project is implemented, this section should contain
   - a link to the language specification section (if any)
 
 ## References 
-Links to external references, discussions or RFCs
+[1] https://wiki.php.net/rfc/saner-numeric-strings
+[2] https://wiki.php.net/rfc/string_to_number_comparison
 
 ## Rejected Features 
 Keep this updated with features that were discussed on the mail lists.
