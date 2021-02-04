@@ -35,8 +35,11 @@ which is an issue in itself when using a function which returns a `float` but gi
 an `int` compatible return is to be expected, this mostly affects mathematical functions, the most notable
 example being the ``round()`` function when passing a non-positive precision
 
-Finally, the use of a `float` or float string as a string offset already emits a warning as it needs
+The use of a `float` or float string as a string offset already emits a warning as it needs
 to perform a conversion, this proposal would generalize this aspect to other areas of PHP.
+
+Finally, attempting to pass a `float` or float string which exceeds the range representable by an `int`
+already causes a `TypeError` to be thrown.
 
 ## Implementation notes
 
