@@ -74,7 +74,12 @@ None
 Rules about accepting floats instead of int would need to be reviewed as emitting diagnostics pose an issue from my understanding
 
 ## Open Issues 
-Make sure there are no open issues when the vote starts!
+### Which severity should the diagnostic be?
+The use of `E_WARNING` might be unwarrented and too high for many code bases which hard error on `E_WARNING`.
+Maybe use `E_NOTICE` or ressurect `E_STRICT` instead?
+
+As the proposal is to also change this into a `TypeError` in the next major version,
+possibly `E_DEPRECATED` is more appropriate?
 
 ## Unaffected PHP Functionality
 
