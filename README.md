@@ -1,55 +1,60 @@
-# PHP RFC: Warning for implicit float to int conversions
-  * Version: 0.1
+# PHP RFC: Deprecate implicit non-integer-compatible float to int conversions
+  * Version: 0.2
   * Date: 2021-02-03
   * Author: George Peter Banyard, <girgias@php.net>
   * Status: Draft
-  * First Published at: http://wiki.php.net/rfc/float-int-warning
+  * First Published at: http://wiki.php.net/rfc/implicit-float-int-deprecate
   * GitHub mirror: https://github.com/Girgias/float-int-warning
 
 ## Introduction 
 
 PHP is a dynamically typed language and as such implicit type coercion naturally arises,
 most of these are harmless and rather convenient.
-However, `float` to `int` conversion can lead to data loss if the fractional part is non zero.
+However, `float` to `int` conversions can lead to data loss such as when the `float` is outside the platform integer range, or it has a fractional part.
 This extends to the conversion of float strings when converted to `int`.
 
+## Terminology
+
+A float is said to be integer-compatible if posses the following characteristics:
+
+ - Is a number (i.e. not NaN or Infinity)
+ - Is in range of a PHP integer (platform dependent)
+ - Has no fractional part
+
 ## Proposal
-Emit an `E_WARNING` level diagnostic error for implicit conversion from `float` and float strings
-to `int` if the fractionnal part is non-zero.
+Emit an `E_DEPRECATED` deprecation diagnostic for implicit conversion from `float` and float strings to `int` if the floating point number is not integer-compatible.
 
-The warning is dependent on the origin type which leads the conversion, i.e. separate warnings for
-`float` to `int` and float string to `int`.
+If the conversion happens from a `float` the diagnostic message is:
+> Implicit conversion to int from non-compatible float
 
-And raise these warnings to `TypeError` in the next major version (PHP 9.0).
+If the conversion happens from a `float`-string the diagnostic message is:
+> Implicit conversion to int from non-compatible float-string
+
+Raise these warnings to `TypeError` in the next major version (PHP 9.0).
 
 ## Rationale
 
-Following the changes in behaviour and definition of numeric strings in PHP 8 [1][2] it should be a
-reasonable expectation to safely be able to use PHP's type juggling from string to int as such data
-can come from a variety from places (HTTP request, database query, text file, etc.).
-However, because `float`s, and by extension float strings, get silently converted to `int` there is
-no way to know if the data provided is erroneous and/or provokes data loss.
+Following the changes in behaviour and definition of numeric strings in PHP 8 [1][2] it should be a reasonable expectation to safely be able to use PHP's type juggling from string to integer as such data can come from a variety of places (HTTP request, database query, text file, etc. ).
+However, because `float`s, and by extension float strings, get silently converted to `int` there is no way to know if the data provided is erroneous and/or provokes data loss.
 
-The lack of possibility of knowing if data loss arised necessitates the use of the `strict_type` mode,
-which is an issue in itself when using a function which returns a `float` but given the input arguments
-an `int` compatible return is to be expected, this mostly affects mathematical functions, the most notable
-example being the ``round()`` function when passing a non-positive precision
+The lack of possibility of knowing if data loss arises necessitates the use of the `strict_type` mode, which is an issue in itself when using a function which returns a `float` but given the input arguments
+an `int` compatible return is to be expected, this mostly affects mathematical functions, the most notable example being the ``round()`` function when passing a non-positive precision
 
 The use of a `float` or float string as a string offset already emits a warning as it needs
 to perform a conversion, this proposal would generalize this aspect to other areas of PHP.
 
-Finally, attempting to pass a `float` or float string which exceeds the range representable by an `int`
-already causes a `TypeError` to be thrown.
+Finally, attempting to pass a `float` or float string which exceeds the range representable by an `int` already causes a `TypeError` to be thrown.
 
 ## Implementation notes
 
-A new `zend_dval_to_lval_safe()` C function is introduced which performs an additional `modf()` check against 0.
+A new C function `is_long_compatible()` is introduced which performs a round trip (i.e. `(double)(zend_long)`) check to establish if a float is integer-compatible.
 
-The C function `zend_dval_to_lval_cap()` is modified and has this additional `modf()` check introduced as it is only
-used twice, and both times for converting float strings to int.
+A new `zend_dval_to_lval_safe()` C function is introduced which performs a check to `is_long_compatible()` that if it fails will emit the deprecation diagnostic.
+
+The `zend_get_long_func()` is modified to accept an additional argument named `is_lax`, which purpose is to toggle between using `zend_dval_to_lval()` or `zend_dval_to_lval_safe()`, as this function is used by the `(int)` cast.
 
 ## Backward Incompatible Changes
-The following operations will now emit an `E_WARNING` if a `float`s or float string with non-zero fractional part is used:
+The following operations will now emit an `E_DEPRECATED` if a non-integer-compatible `float`s or float string is used:
 
  - Bitwise OR operator `|`
  - Bitwise AND operator `&`
@@ -57,32 +62,29 @@ The following operations will now emit an `E_WARNING` if a `float`s or float str
  - Shift right and left operators
  - Modulo operator
  - The combined assignment operators of the above operators
- - Assignement to a typed property of type `int` in coercive typing mode
+ - Assignment to a typed property of type `int` in coercive typing mode
  - Argument for a parameter of type `int` for both internal and userland functions in coercive typing mode
  - Returning such a value for userland functions declared with a return type of ``int`` in coercive typing mode
 
-The followig operations will now emit an `E_WARNING` if a `float` with non-zero fractional part is used:
+The following operations will now emit an `E_DEPRECATED` if a non-integer-compatible `float` is used:
 
   - Bitwise NOT operator `~`
-  - Used as an array key
+  - As an array key
 
-## Proposed PHP Version(s) 
+## Proposed PHP Version
+
 Next minor version: PHP 8.1.
 
 ## RFC Impact 
 ### To Existing Extensions 
-None
 
-### To OPcache 
+Test output might need to be adjusted as the `zval_get_long()` (and TBD `convert_to_long()`) will call the new `zend_dval_to_lval_safe()` function instead of `zend_dval_to_lval()`
+
+Extensions which call directly `zend_get_long_func()` will need to be adjusted to either use `zval_get_long()` or pass explicitly the new `lax` flag.
+
+### To OPcache
+
 Rules about accepting floats instead of int would need to be reviewed as emitting diagnostics pose an issue from my understanding
-
-## Open Issues 
-### Which severity should the diagnostic be?
-The use of `E_WARNING` might be unwarrented and too high for many code bases which hard error on `E_WARNING`.
-Maybe use `E_NOTICE` or ressurect `E_STRICT` instead?
-
-As the proposal is to also change this into a `TypeError` in the next major version,
-possibly `E_DEPRECATED` is more appropriate?
 
 ## Unaffected PHP Functionality
 
@@ -96,6 +98,7 @@ possibly `E_DEPRECATED` is more appropriate?
 ## Future Scope
  - Possibility to normalize float strings for array keys.
  - Possibility to allow compatible float and float strings for string offsets.
+ - Normalize behaviour when casting to int from out-of-range float.
 
 ## Proposed Voting Choices
 As per the voting RFC a yes/no vote with a 2/3 majority is needed for this proposal to be accepted.
@@ -110,9 +113,10 @@ After the project is implemented, this section should contain
   - a link to the PHP manual entry for the feature
   - a link to the language specification section (if any)
 
-## References 
-[1] https://wiki.php.net/rfc/saner-numeric-strings
-[2] https://wiki.php.net/rfc/string_to_number_comparison
+## References
+
+[1]<https://wiki.php.net/rfc/saner-numeric-strings>  
+[2]<https://wiki.php.net/rfc/string_to_number_comparison>  
 
 ## Rejected Features 
 Keep this updated with features that were discussed on the mail lists.
